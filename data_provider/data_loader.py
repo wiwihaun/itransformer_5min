@@ -208,10 +208,14 @@ class Dataset_ETT_minute(Dataset):
 
         #seq_x = self.data_x[s_begin:s_end]
         #seq_y = self.data_y[r_begin:r_end]
-        # 加上 .copy() 防止改到原始資料
+        
+        #處理encoder得到為數據
         seq_x = self.data_x[s_begin:s_end].copy()
         seq_x[:, -1] = 0.0 
-        seq_y = self.data_y[r_begin:r_end]
+        
+        #處理decoder洩漏未來數據
+        seq_y = self.data_y[r_begin:r_end].copy() # 🚨 加上 .copy()
+        seq_y[:self.label_len, -1] = 0.0
 
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
