@@ -17,7 +17,12 @@ warnings.filterwarnings('ignore')
 class StockBCELoss(nn.Module):
     def __init__(self):
         super().__init__()
-        self.bce = nn.BCEWithLogitsLoss()
+        # 1. 建立一個 Tensor 來存放權重 (假設您算出來是 2.5)
+        # 必須確保它跟模型跑在同一個設備上 (通常是 cuda)
+        weight_tensor = torch.tensor([2.5]).cuda() 
+        
+        # 2. 將權重傳入 BCEWithLogitsLoss
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
 
     def forward(self, pred, true):
         # 1. 破解框架的雞婆標準化：
