@@ -14,6 +14,21 @@ from utils.augmentation import run_augmentation, run_augmentation_single
 
 warnings.filterwarnings('ignore')
 
+class StockBCELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.bce = nn.BCEWithLogitsLoss()
+
+    def forward(self, pred, true):
+        # 1. 破解框架的雞婆標準化：
+        # 標準化後的數據，平均值會是 0。所以大於 0 的，就是原本真實的 1(漲)
+        # 我們在這裡把 true 強制還原回純淨的 0 和 1 (float格式)
+        true_binary = (true > 0).float()
+        
+        # 2. 為了防止模型偷看未來的極端作弊行為，我們還可以對 true_binary 加入一些防禦機制
+        # 但最關鍵的是把還原後的 0/1 交給真正的 BCE 計算
+        return self.bce(pred, true_binary)
+
 
 class Exp_Long_Term_Forecast(Exp_Basic):
     def __init__(self, args):
@@ -35,7 +50,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss()
+        criterion = StockBCELoss()  # 改成我們剛剛寫的客製化 Loss
         return criterion
  
 
