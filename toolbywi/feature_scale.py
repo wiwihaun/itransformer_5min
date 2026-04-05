@@ -88,53 +88,26 @@ def features(df):
 
 
 def scaler(df, train_ratio=0.7):
-    print("🛠️ 開始執行分類客製化縮放 (防未來洩漏機制啟動)...")
+    print("🛠️ 開始執行統一 Z-Score 縮放 (防未來洩漏機制啟動)...")
     df_scaled = df.copy()
 
     # 計算訓練集的截止邊界
-    # 假設您的資料是按照時間由舊到新排序好的
     train_end_idx = int(len(df_scaled) * train_ratio)
 
     # ==========================================
-    # 📌 陣營一：無邊界特徵 (使用訓練集進行 Z-Score)
+    # 📌 統一對所有數值特徵進行 Z-Score（排除 date 和 target）
     # ==========================================
-    cols_to_zscore = [
-        'Open', 'High', 'Low', 'Close', 'Volume',
-        'Quote_asset_volume', 'Taker_buy_quote_asset_volume',
-        'MACD', 'MACD_Hist', 'Bias_20', 'ATR_14',
-        'BB_Width', 'OBV', 'Force_Index'
-    ]
+    feature_cols = [c for c in df_scaled.columns if c not in ['date', 'target']]
 
-    # 確保這些欄位真的存在於 df 中
-    cols_to_zscore = [c for c in cols_to_zscore if c in df_scaled.columns]
-
-    if cols_to_zscore:
-        scaler = StandardScaler()
+    if feature_cols:
+        sc = StandardScaler()
         # 🚨 絕對關鍵：只用訓練集 (0 ~ train_end_idx) 來 fit 計算均值和標準差！
-        scaler.fit(df_scaled.loc[:train_end_idx, cols_to_zscore])
+        sc.fit(df_scaled.loc[:train_end_idx, feature_cols])
 
-        # transform 可以大膽套用到全部資料 (包含測試集)
-        df_scaled[cols_to_zscore] = scaler.transform(df_scaled[cols_to_zscore])
+        # transform 套用到全部資料 (包含測試集)
+        df_scaled[feature_cols] = sc.transform(df_scaled[feature_cols])
 
-    # ==========================================
-    # 📌 陣營二：0~100 固定範圍特徵 (除以 100)
-    # ==========================================
-    cols_to_pct = ['RSI_14', 'Stoch_K', 'Stoch_D', 'MFI_14']
-    cols_to_pct = [c for c in cols_to_pct if c in df_scaled.columns]
-
-    if cols_to_pct:
-        # 將 85 變成 0.85，完美保留邊界意義
-        df_scaled[cols_to_pct] = df_scaled[cols_to_pct] / 100.0
-
-    # ==========================================
-    # 📌 陣營三：自帶基準特徵 (手動微調)
-    # ==========================================
-    # CCI 正常範圍約 -200 ~ 200，除以 100 讓它落在 -2 ~ 2
-    if 'CCI_20' in df_scaled.columns:
-        df_scaled['CCI_20'] = df_scaled['CCI_20'] / 100.0
-
-    # BB_PB 大多在 0 ~ 1 之間，不須處理！
-
+    print(f"✅ 統一 Z-Score 完成！共縮放 {len(feature_cols)} 個特徵。")
     return df_scaled
 
 
