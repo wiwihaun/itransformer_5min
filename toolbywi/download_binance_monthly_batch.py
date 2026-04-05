@@ -65,7 +65,7 @@ def download_binance_monthly_batch(symbol="BTCUSDT", interval="1h", start_year=2
     print(f"\n🎉 合併完成！總共取得 {len(final_df)} 筆 K 線資料。")
 
     # Time-Series-Library 預設需要一個名為 'date' 的時間欄位
-    df.reset_index(inplace=True)
-    df.rename(columns={'Open_time': 'date'}, inplace=True)
+    final_df.reset_index(inplace=True)
+    final_df.rename(columns={'Open_time': 'date'}, inplace=True)
 
     return final_df

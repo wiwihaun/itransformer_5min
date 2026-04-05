@@ -3,10 +3,10 @@ import pandas as pd
 
 def target_long(df, lookahead=96, tp_pct=0.06, sl_pct=0.02):
     # 將需要運算的欄位轉換為純 NumPy 陣列以最大化效能
-    closes = df_btc['Close'].values
-    highs = df_btc['High'].values
-    lows = df_btc['Low'].values
-    n = len(df_btc)
+    closes = df['Close'].values
+    highs = df['High'].values
+    lows = df['Low'].values
+    n = len(df)
 
     # 建立預設為 0 的 target 陣列
     targets = np.zeros(n, dtype=int)
