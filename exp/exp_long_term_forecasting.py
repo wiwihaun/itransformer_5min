@@ -20,27 +20,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 class StockFocalLoss(nn.Module):
-    def __init__(self, alpha=0.86, gamma=2.0):
+    def __init__(self, alpha=0.31, gamma=2.0):
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
 
-    def forward(self, pred_prob, true):
+    def forward(self, logits, true):
+        # 1. 將真實標籤還原為乾淨的 0 和 1
         true_binary = (true > 0).float()
         
-        # 🚨 防呆機制與極限值保護：確保輸入真的是 0~1 之間的機率
-        # 如果模型吐出 1.0，log(1-1.0) 會變成無限大崩潰，所以要 clamp 限制範圍
-        pred_prob = torch.clamp(pred_prob, min=1e-7, max=1.0 - 1e-7)
+        # 🚨 2. 最關鍵的一步：使用帶有 Logits 的 BCE！
+        # 這裡的函數內建了極度穩定的 Sigmoid，我們不需要 (也不可以) 自己做 clamp 或 sigmoid
+        bce_loss = F.binary_cross_entropy_with_logits(logits, true_binary, reduction='none')
         
-        # 1. 使用普通的 BCE (沒有 Logits，不會發生 Double-Sigmoid)
-        bce_loss = F.binary_cross_entropy(pred_prob, true_binary, reduction='none')
+        # 3. 數學黑魔法：反推真實機率 pt
+        # 因為 bce_loss = -log(pt)，所以用 exp(-bce_loss) 就可以完美還原 pt，且絕對不會有極限值報錯
+        pt = torch.exp(-bce_loss)
         
-        # 2. 直接計算 pt
-        # 如果真實是 1，pt 就是預測機率；如果真實是 0，pt 就是 (1 - 預測機率)
-        pt = torch.where(true_binary == 1, pred_prob, 1 - pred_prob)
-        
-        # 3. Focal Loss 核心加權
+        # 4. Focal Loss 核心加權
         alpha_factor = true_binary * self.alpha + (1 - true_binary) * (1 - self.alpha)
         focal_loss = alpha_factor * (1 - pt) ** self.gamma * bce_loss
         
