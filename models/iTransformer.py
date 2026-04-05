@@ -61,9 +61,19 @@ class Model(nn.Module):
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
 
         dec_out = self.projection(enc_out).permute(0, 2, 1)[:, :, :N]
+        
         # De-Normalization from Non-stationary Transformer
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        #dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        #dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        
+        # 修改後（好的）：只對非 target 欄做 de-norm，最後一欄保留 raw logit
+        denorm_stdev = stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
+        denorm_means = means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
+        denorm_stdev[:, :, -1] = 1.0   # target 欄 stdev 設為 1（不縮放）
+        denorm_means[:, :, -1] = 0.0   # target 欄 mean 設為 0（不位移）
+        dec_out = dec_out * denorm_stdev
+        dec_out = dec_out + denorm_means
+        
         return dec_out
 
     def imputation(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask):
