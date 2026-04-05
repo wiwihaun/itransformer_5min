@@ -298,11 +298,7 @@ class Dataset_Custom(Dataset):
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]
 
-        #測試資料模擬真實情況的
-        if self.set_type == 2:
-            border1 = 0
-            border2 = len(df_raw)
-
+      
 
         if self.features == 'M' or self.features == 'MS':
             cols_data = df_raw.columns[1:]
