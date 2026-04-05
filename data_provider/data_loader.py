@@ -41,6 +41,7 @@ class Dataset_ETT_hour(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
+        self.scale = False
         self.timeenc = timeenc
         self.freq = freq
 
@@ -150,6 +151,7 @@ class Dataset_ETT_minute(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
+        self.scale = False
         self.timeenc = timeenc
         self.freq = freq
 
@@ -261,6 +263,7 @@ class Dataset_Custom(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
+        self.scale = False
         self.timeenc = timeenc
         self.freq = freq
 
