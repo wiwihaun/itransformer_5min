@@ -118,14 +118,14 @@ def run_backtest(df_test,
             if current_low <= stop_price:
                 loss = invested_amount * stop_loss_pct
                 capital += (invested_amount - loss)
-                sl_records.append((current_date, stop_price))
+                sl_records.append((current_date, stop_price, entry_price))
                 in_position = False
 
             # 停利
             elif current_high >= target_price:
                 profit = invested_amount * take_profit_pct
                 capital += (invested_amount + profit)
-                tp_records.append((current_date, target_price))
+                tp_records.append((current_date, target_price, entry_price))
                 in_position = False
 
             # 超時出場
@@ -133,11 +133,11 @@ def run_backtest(df_test,
                 actual_return = (current_close - entry_price) / entry_price
                 profit = invested_amount * actual_return
                 capital += (invested_amount + profit)
-                te_records.append((current_date, current_close))
+                te_records.append((current_date, current_close, entry_price))
                 in_position = False
 
-        # 狀態 B：檢查進場
-        if not in_position:
+        # 狀態 B：檢查進場（elif 確保出場K線不會同時進場）
+        elif not in_position:
             time_since_last = current_date - last_trade_date
             if signal == 1 and time_since_last >= pd.Timedelta(hours=cooldown_hours):
                 in_position     = True
@@ -184,19 +184,19 @@ def plot_results(df_test, buy_records, tp_records, sl_records, te_records,
                         s=120, label='Buy', zorder=5)
 
     if tp_records:
-        tp_dates, tp_prices = zip(*tp_records)
+        tp_dates, tp_prices, _ = zip(*tp_records)
         axes[0].scatter(tp_dates, tp_prices, marker='*', color='gold', s=250,
                         edgecolor='black',
                         label=f'Take Profit (+{take_profit_pct*100:.0f}%)', zorder=6)
 
     if sl_records:
-        sl_dates, sl_prices = zip(*sl_records)
+        sl_dates, sl_prices, _ = zip(*sl_records)
         axes[0].scatter(sl_dates, sl_prices, marker='X', color='magenta', s=150,
                         edgecolor='black',
                         label=f'Stop Loss (-{stop_loss_pct*100:.0f}%)', zorder=6)
 
     if te_records:
-        te_dates, te_prices = zip(*te_records)
+        te_dates, te_prices, _ = zip(*te_records)
         axes[0].scatter(te_dates, te_prices, marker='v', color='saddlebrown',
                         s=100, label='Time Exit', zorder=5)
 
