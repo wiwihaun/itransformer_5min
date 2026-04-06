@@ -3,86 +3,108 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 def features(df):
-    print("🛠️ 開始計算 13 大黃金技術指標 (完全去價格化)...")
+    """
+    全新 18 特徵組（基於五篇高引用論文）
+    來源：arXiv 2311.14759 / 2410.06935 / 2511.00665 / MDPI TFT / GitHub baruch1192
+    分類：原始價量(2) + 趨勢(4) + 動量(5) + 波動(3) + 量能(4)
+    """
+    print("🛠️ 開始計算全新 18 特徵組 (基於五篇高引用論文)...")
     df = df.copy()
 
-    # ==========================================
-    # 📌 1. 計算趨勢指標 (Trend)
-    # ==========================================
-    # MACD 與 MACD_Hist (只留 Hist 和 MACD，不留 Signal 減少雜訊)
-    ema_12 = df['Close'].ewm(span=12, adjust=False).mean()
-    ema_26 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = ema_12 - ema_26
-    macd_signal = df['MACD'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = df['MACD'] - macd_signal
-
-    # Bias_20 (乖離率)
-    ema_20 = df['Close'].ewm(span=20, adjust=False).mean()
-    df['Bias_20'] = (df['Close'] - ema_20) / ema_20 * 100
+    # ── 共用 True Range 計算（供 ADX、ATR 使用）─────────
+    high_low  = df['High'] - df['Low']
+    high_prev = (df['High'] - df['Close'].shift(1)).abs()
+    low_prev  = (df['Low']  - df['Close'].shift(1)).abs()
+    tr = pd.concat([high_low, high_prev, low_prev], axis=1).max(axis=1)
 
     # ==========================================
-    # 📌 2. 計算動能與震盪指標 (Momentum/Oscillator)
+    # 📌 1. 趨勢類（4 個）
+    # 論文：arXiv 2511.00665 — 最佳 EMA 6/95；ADX(13)
     # ==========================================
-    # RSI_14
-    delta = df['Close'].diff()
-    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    df['RSI_14'] = 100 - (100 / (1 + gain / loss))
+    df['EMA_6']     = df['Close'].ewm(span=6,  adjust=False).mean()
+    df['EMA_95']    = df['Close'].ewm(span=95, adjust=False).mean()
+    df['EMA_Cross'] = df['EMA_6'] - df['EMA_95']   # 黃金/死亡交叉強度
 
-    # Stoch_K & Stoch_D (KD指標)
-    low_14 = df['Low'].rolling(window=14).min()
-    high_14 = df['High'].rolling(window=14).max()
-    df['Stoch_K'] = (df['Close'] - low_14) / (high_14 - low_14 + 1e-8) * 100
-    df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
-
-    # CCI_20 (順勢指標)
-    tp = (df['High'] + df['Low'] + df['Close']) / 3
-    tp_sma_20 = tp.rolling(20).mean()
-    mad = tp.rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
-    df['CCI_20'] = (tp - tp_sma_20) / (0.015 * mad + 1e-8)
+    # ADX(13)：趨勢強弱指標
+    plus_dm  = (df['High'] - df['High'].shift(1)).clip(lower=0)
+    minus_dm = (df['Low'].shift(1) - df['Low']).clip(lower=0)
+    plus_dm  = plus_dm.where(plus_dm > minus_dm, 0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0)
+    atr13    = tr.ewm(span=13, adjust=False).mean()
+    plus_di  = 100 * plus_dm.ewm(span=13, adjust=False).mean()  / (atr13 + 1e-8)
+    minus_di = 100 * minus_dm.ewm(span=13, adjust=False).mean() / (atr13 + 1e-8)
+    dx       = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-8)
+    df['ADX_13'] = dx.ewm(span=13, adjust=False).mean()
 
     # ==========================================
-    # 📌 3. 計算波動率與爆發指標 (Volatility)
+    # 📌 2. 動量類（5 個）
+    # 論文：arXiv 2410.06935 Chi-Squared Top3：RSI30、MACD、MOM30
+    #       arXiv 2511.00665：MACD(17, 21, 15)
     # ==========================================
-    # ATR_14 (真實波動幅度)
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift(1))
-    low_close = np.abs(df['Low'] - df['Close'].shift(1))
-    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df['ATR_14'] = true_range.rolling(window=14).mean()
+    # RSI(14)
+    d14   = df['Close'].diff()
+    g14   = d14.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+    l14   = (-d14.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+    df['RSI_14'] = 100 - (100 / (1 + g14 / (l14 + 1e-8)))
 
-    # BB_Width & BB_PB (布林帶寬度與位置)
-    sma_20 = df['Close'].rolling(window=20).mean()
-    std_20 = df['Close'].rolling(window=20).std()
-    upper_band = sma_20 + (std_20 * 2)
-    lower_band = sma_20 - (std_20 * 2)
-    df['BB_Width'] = (upper_band - lower_band) / sma_20 * 100
-    df['BB_PB'] = (df['Close'] - lower_band) / (upper_band - lower_band + 1e-8)
+    # RSI(30)
+    d30   = df['Close'].diff()
+    g30   = d30.clip(lower=0).ewm(alpha=1/30, adjust=False).mean()
+    l30   = (-d30.clip(upper=0)).ewm(alpha=1/30, adjust=False).mean()
+    df['RSI_30'] = 100 - (100 / (1 + g30 / (l30 + 1e-8)))
 
-    # ==========================================
-    # 📌 4. 計算量價資金流指標 (Volume/Money Flow)
-    # ==========================================
-    # OBV (能量潮)
-    obv = np.where(df['Close'] > df['Close'].shift(1), df['Volume'],
-          np.where(df['Close'] < df['Close'].shift(1), -df['Volume'], 0))
-    df['OBV'] = pd.Series(obv).cumsum()
+    # MACD(17, 21) + Signal(15)
+    ema17 = df['Close'].ewm(span=17, adjust=False).mean()
+    ema21 = df['Close'].ewm(span=21, adjust=False).mean()
+    df['MACD']        = ema17 - ema21
+    df['MACD_Signal'] = df['MACD'].ewm(span=15, adjust=False).mean()
 
-    # MFI_14 (資金流量指標)
-    raw_mf = tp * df['Volume']
-    pos_mf = np.where(tp > tp.shift(1), raw_mf, 0)
-    neg_mf = np.where(tp < tp.shift(1), raw_mf, 0)
-    pos_mf_sum = pd.Series(pos_mf).rolling(14).sum()
-    neg_mf_sum = pd.Series(neg_mf).rolling(14).sum()
-    df['MFI_14'] = 100 - (100 / (1 + (pos_mf_sum / (neg_mf_sum + 1e-8))))
-
-    # Force_Index (強力指標)
-    df['Force_Index'] = (df['Close'].diff() * df['Volume']).ewm(span=13, adjust=False).mean()
+    # MOM(30)：動能
+    df['MOM_30'] = df['Close'] - df['Close'].shift(30)
 
     # ==========================================
-    # 1. 清除因為 rolling 產生的初期空值
+    # 📌 3. 波動類（3 個）
+    # ==========================================
+    df['ATR_14']  = tr.rolling(14).mean()
+
+    sma20  = df['Close'].rolling(20).mean()
+    std20  = df['Close'].rolling(20).std()
+    upper  = sma20 + 2 * std20
+    lower  = sma20 - 2 * std20
+    df['BB_Width'] = (upper - lower) / (sma20 + 1e-8) * 100
+    df['BB_PB']    = (df['Close'] - lower) / (upper - lower + 1e-8)
+
+    # ==========================================
+    # 📌 4. 量能類（4 個）
+    # 論文：MDPI TFT — 主動買量最具預測力
+    #       GitHub baruch1192 — CMF 取代 MFI
+    # ==========================================
+    # OBV
+    obv_vals = np.where(df['Close'] > df['Close'].shift(1),  df['Volume'],
+               np.where(df['Close'] < df['Close'].shift(1), -df['Volume'], 0))
+    df['OBV'] = pd.Series(obv_vals, index=df.index).cumsum()
+
+    # CMF(14)：柴金資金流量（比 MFI 更純粹）
+    clv = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) \
+          / (df['High'] - df['Low'] + 1e-8)
+    df['CMF_14'] = (clv * df['Volume']).rolling(14).sum() \
+                   / (df['Volume'].rolling(14).sum() + 1e-8)
+
+    # Volume_Ratio：相對成交量（過濾異常放量）
+    df['Volume_Ratio'] = df['Volume'] / (df['Volume'].rolling(20).mean() + 1e-8)
+
+    # Taker_Ratio：主動買方比例（Binance 獨有，反映多空力道）
+    if 'Taker_buy_quote_asset_volume' in df.columns \
+            and 'Quote_asset_volume' in df.columns:
+        df['Taker_Ratio'] = df['Taker_buy_quote_asset_volume'] \
+                            / (df['Quote_asset_volume'] + 1e-8)
+
+    # ==========================================
+    # 清除 rolling 產生的初期空值
     df = df.dropna().reset_index(drop=True)
 
-    print(f"✅ 計算與清理完成！目前總特徵數: {len(df.columns) - 2} 個 (不含時間與標籤)。")
+    feature_count = len([c for c in df.columns if c not in ['date', 'target']])
+    print(f"✅ 完成！共 {feature_count} 個特徵（不含 date、target）。")
     return df
 
 
