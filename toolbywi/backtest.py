@@ -63,19 +63,25 @@ def load_data(csv_path, prob_threshold=0.5, result_dir='./results/',
     df_test = df_raw.tail(test_len).copy().reset_index(drop=True)
     df_test['signal'] = pred_signals
 
-    # 若特徵 CSV 缺少 High/Low，從原始 OHLCV CSV 補齊
-    missing_cols = [c for c in ['High', 'Low'] if c not in df_test.columns]
-    if missing_cols:
-        if price_csv_path is None:
-            raise ValueError(
-                f"特徵 CSV 缺少 {missing_cols} 欄位，請提供 price_csv_path（原始 OHLCV CSV）"
-            )
+    # 從原始 OHLCV CSV 取得真實 Close/High/Low（避免用 Z-score 標準化後的值做回測）
+    if price_csv_path is None:
+        # 若沒提供 price_csv_path，確認 CSV 本身有原始價格
+        for col in ['Close', 'High', 'Low']:
+            if col not in df_test.columns:
+                raise ValueError(
+                    f"特徵 CSV 缺少 {col} 欄位，請提供 price_csv_path（原始 OHLCV CSV）"
+                )
+    else:
         df_price = pd.read_csv(price_csv_path)
         df_price['date'] = pd.to_datetime(df_price['date'])
-        df_price = df_price[['date', 'High', 'Low']]
+        df_price = df_price[['date', 'Close', 'High', 'Low']]
+        # 移除特徵 CSV 中的 scaled Close（若存在），改用原始價格
+        drop_cols = [c for c in ['Close', 'High', 'Low'] if c in df_test.columns]
+        if drop_cols:
+            df_test = df_test.drop(columns=drop_cols)
         df_test = df_test.merge(df_price, on='date', how='left')
-        if df_test[['High', 'Low']].isnull().any().any():
-            raise ValueError("High/Low 合併後有 NaN，請確認兩份 CSV 的 date 欄位對齊")
+        if df_test[['Close', 'High', 'Low']].isnull().any().any():
+            raise ValueError("Close/High/Low 合併後有 NaN，請確認兩份 CSV 的 date 欄位對齊")
 
     return df_test, pred_probs
 
