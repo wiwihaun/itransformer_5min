@@ -4,11 +4,12 @@ from sklearn.preprocessing import StandardScaler
 
 def features(df):
     """
-    全新 18 特徵組（基於五篇高引用論文）
+    全新 18 特徵組（基於五篇高引用論文）— 5min K 線版
     來源：arXiv 2311.14759 / 2410.06935 / 2511.00665 / MDPI TFT / GitHub baruch1192
     分類：原始價量(2) + 趨勢(4) + 動量(5) + 波動(3) + 量能(4)
+    5min 調整：EMA_6→EMA_72 (6h)，ADX_13→ADX_156 (13h)，其餘不變
     """
-    print("🛠️ 開始計算全新 18 特徵組 (基於五篇高引用論文)...")
+    print("🛠️ 開始計算全新 18 特徵組 [5min 版]...")
     df = df.copy()
 
     # ── 共用 True Range 計算（供 ADX、ATR 使用）─────────
@@ -19,22 +20,22 @@ def features(df):
 
     # ==========================================
     # 📌 1. 趨勢類（4 個）
-    # 論文：arXiv 2511.00665 — 最佳 EMA 6/95；ADX(13)
+    # 5min 版：span × 12 以維持等效時間（1h EMA_6 = 6h = 5min EMA_72）
     # ==========================================
-    df['EMA_6']     = df['Close'].ewm(span=6,  adjust=False).mean()
-    df['EMA_95']    = df['Close'].ewm(span=95, adjust=False).mean()
-    df['EMA_Cross'] = df['EMA_6'] - df['EMA_95']   # 黃金/死亡交叉強度
+    df['EMA_72']    = df['Close'].ewm(span=72,  adjust=False).mean()  # 6h（等效 1h EMA_6）
+    df['EMA_95']    = df['Close'].ewm(span=95, adjust=False).mean()   # ~8h（原 1h EMA_95，仍合理）
+    df['EMA_Cross'] = df['EMA_72'] - df['EMA_95']   # 黃金/死亡交叉強度
 
-    # ADX(13)：趨勢強弱指標
+    # ADX(156)：13h 等效（1h ADX_13 × 12）
     plus_dm  = (df['High'] - df['High'].shift(1)).clip(lower=0)
     minus_dm = (df['Low'].shift(1) - df['Low']).clip(lower=0)
     plus_dm  = plus_dm.where(plus_dm > minus_dm, 0)
     minus_dm = minus_dm.where(minus_dm > plus_dm, 0)
-    atr13    = tr.ewm(span=13, adjust=False).mean()
-    plus_di  = 100 * plus_dm.ewm(span=13, adjust=False).mean()  / (atr13 + 1e-8)
-    minus_di = 100 * minus_dm.ewm(span=13, adjust=False).mean() / (atr13 + 1e-8)
+    atr156   = tr.ewm(span=156, adjust=False).mean()
+    plus_di  = 100 * plus_dm.ewm(span=156, adjust=False).mean()  / (atr156 + 1e-8)
+    minus_di = 100 * minus_dm.ewm(span=156, adjust=False).mean() / (atr156 + 1e-8)
     dx       = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-8)
-    df['ADX_13'] = dx.ewm(span=13, adjust=False).mean()
+    df['ADX_156'] = dx.ewm(span=156, adjust=False).mean()
 
     # ==========================================
     # 📌 2. 動量類（5 個）

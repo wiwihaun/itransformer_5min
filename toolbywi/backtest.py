@@ -89,10 +89,10 @@ def load_data(csv_path, prob_threshold=0.5, result_dir='./results/',
 def run_backtest(df_test,
                  initial_capital=1000.0,
                  position_size=0.10,
-                 take_profit_pct=0.06,
-                 stop_loss_pct=0.02,
-                 max_hold_days=7,
-                 cooldown_hours=24):
+                 take_profit_pct=0.02,
+                 stop_loss_pct=0.01,
+                 max_hold_days=1,
+                 cooldown_hours=4):
     """
     執行事件驅動回測核心邏輯。
 
@@ -279,10 +279,10 @@ def backtest(csv_path,
              price_csv_path=None,
              initial_capital=1000.0,
              position_size=0.10,
-             take_profit_pct=0.06,
-             stop_loss_pct=0.02,
-             max_hold_days=7,
-             cooldown_hours=24,
+             take_profit_pct=0.02,
+             stop_loss_pct=0.01,
+             max_hold_days=1,
+             cooldown_hours=4,
              prob_threshold=0.5):
     """
     一鍵執行完整回測流程：自動找資料夾 → 載入資料 → 回測 → 畫圖 → 輸出績效。

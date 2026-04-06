@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-def target_long(df, lookahead=96, tp_pct=0.06, sl_pct=0.02):
+def target_long(df, lookahead=288, tp_pct=0.02, sl_pct=0.01):
     # 將需要運算的欄位轉換為純 NumPy 陣列以最大化效能
     closes = df['Close'].values
     highs = df['High'].values
@@ -22,7 +22,7 @@ def target_long(df, lookahead=96, tp_pct=0.06, sl_pct=0.02):
         # 確保不會超出資料邊界
         end_idx = min(n, i + 1 + lookahead)
 
-        # 往未來 96 根檢查
+        # 往未來 288 根（24小時）檢查
         for j in range(i + 1, end_idx):
             # 保守原則：若同一根 K 線同時觸及止盈與止損，視為打止損 (0)
             if lows[j] <= target_down and highs[j] >= target_up:
@@ -37,7 +37,7 @@ def target_long(df, lookahead=96, tp_pct=0.06, sl_pct=0.02):
 
     return targets
 
-def target_short(df, lookahead=96, tp_pct=0.06, sl_pct=0.02):
+def target_short(df, lookahead=288, tp_pct=0.02, sl_pct=0.01):
     """
     計算做空 (Short) 用的目標標籤。
     - 標記 1: 優先觸及止盈價 (向下 tp_pct)
