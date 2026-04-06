@@ -33,18 +33,20 @@ def find_latest_folder(result_dir='./results/'):
     return latest_folder
 
 
-def load_data(csv_path, prob_threshold=0.5, result_dir='./results/', pred_path=None):
+def load_data(csv_path, prob_threshold=0.5, result_dir='./results/',
+              pred_path=None, price_csv_path=None):
     """
     載入預測結果與原始資料，對齊時間軸。
-    若未指定 pred_path，自動從 result_dir 找最新資料夾讀取 pred.npy。
+    若 csv_path 缺少 High/Low 欄位，需提供 price_csv_path（原始 OHLCV CSV）補齊。
 
     參數:
-        csv_path      (str)  : 特徵 CSV 路徑
-        prob_threshold(float): 進場機率門檻，預設 0.5
-        result_dir    (str)  : 模型結果根目錄，預設 './results/'
-        pred_path     (str)  : 若指定則直接使用，不自動搜尋
+        csv_path       (str)  : 特徵 CSV 路徑
+        prob_threshold (float): 進場機率門檻，預設 0.5
+        result_dir     (str)  : 模型結果根目錄，預設 './results/'
+        pred_path      (str)  : 若指定則直接使用，不自動搜尋
+        price_csv_path (str)  : 原始 OHLCV CSV 路徑（含 High/Low），若特徵 CSV 已刪除則必填
     回傳:
-        df_test    (DataFrame): 包含 signal 欄位的測試集
+        df_test    (DataFrame): 包含 signal / Close / High / Low 欄位的測試集
         pred_probs (ndarray)  : 預測機率
     """
     if pred_path is None:
@@ -60,6 +62,20 @@ def load_data(csv_path, prob_threshold=0.5, result_dir='./results/', pred_path=N
     df_raw['date'] = pd.to_datetime(df_raw['date'])
     df_test = df_raw.tail(test_len).copy().reset_index(drop=True)
     df_test['signal'] = pred_signals
+
+    # 若特徵 CSV 缺少 High/Low，從原始 OHLCV CSV 補齊
+    missing_cols = [c for c in ['High', 'Low'] if c not in df_test.columns]
+    if missing_cols:
+        if price_csv_path is None:
+            raise ValueError(
+                f"特徵 CSV 缺少 {missing_cols} 欄位，請提供 price_csv_path（原始 OHLCV CSV）"
+            )
+        df_price = pd.read_csv(price_csv_path)
+        df_price['date'] = pd.to_datetime(df_price['date'])
+        df_price = df_price[['date', 'High', 'Low']]
+        df_test = df_test.merge(df_price, on='date', how='left')
+        if df_test[['High', 'Low']].isnull().any().any():
+            raise ValueError("High/Low 合併後有 NaN，請確認兩份 CSV 的 date 欄位對齊")
 
     return df_test, pred_probs
 
@@ -254,6 +270,7 @@ def print_stats(df_test, buy_records, tp_records, sl_records, te_records,
 def backtest(csv_path,
              result_dir='./results/',
              pred_path=None,
+             price_csv_path=None,
              initial_capital=1000.0,
              position_size=0.10,
              take_profit_pct=0.06,
@@ -268,6 +285,7 @@ def backtest(csv_path,
         csv_path        (str)  : 特徵 CSV 路徑 (必填)
         result_dir      (str)  : 模型結果根目錄，自動找最新資料夾 (預設 './results/')
         pred_path       (str)  : 若指定則直接使用，不自動搜尋
+        price_csv_path  (str)  : 原始 OHLCV CSV 路徑（含 High/Low），若特徵 CSV 已刪除則必填
         initial_capital (float): 初始資金 (預設 1000)
         position_size   (float): 每次開倉比例 (預設 0.10)
         take_profit_pct (float): 停利百分比 (預設 0.06)
@@ -278,10 +296,13 @@ def backtest(csv_path,
 
     使用範例:
         from backtest import backtest
-        backtest(csv_path='./dataset/stock/stock_features.csv')
+        backtest(
+            csv_path='./dataset/stock/stock_features.csv',
+            price_csv_path='./dataset/stock/raw_ohlcv.csv'
+        )
     """
     try:
-        df_test, _ = load_data(csv_path, prob_threshold, result_dir, pred_path)
+        df_test, _ = load_data(csv_path, prob_threshold, result_dir, pred_path, price_csv_path)
 
         df_test, buy_records, tp_records, sl_records, te_records = run_backtest(
             df_test, initial_capital, position_size,
