@@ -69,3 +69,85 @@ def download_binance_monthly_batch(symbol="BTCUSDT", interval="1h", start_year=2
     final_df.rename(columns={'Open_time': 'date'}, inplace=True)
 
     return final_df
+
+
+def binance_load_5min(symbol="BTCUSDT", start_year=2024, start_month=1,
+                      end_year=2026, end_month=2):
+    """
+    下載幣安 5 分鐘 K 線資料（使用 daily 壓縮檔）。
+    輸出格式與 download_binance_monthly_batch() 完全一致。
+
+    參數:
+        symbol     (str): 交易對，預設 'BTCUSDT'
+        start_year (int): 起始年
+        start_month(int): 起始月
+        end_year   (int): 結束年
+        end_month  (int): 結束月
+    回傳:
+        DataFrame: columns = [date, Open, High, Low, Close, Volume,
+                              Quote_asset_volume, Taker_buy_quote_asset_volume]
+    """
+    interval = "5m"
+    print(f"🚀 開始下載 {symbol} {interval} 日包資料 ({start_year}-{start_month:02d} 到 {end_year}-{end_month:02d})...")
+
+    columns = ['Open_time', 'Open', 'High', 'Low', 'Close', 'Volume',
+               'Close_time', 'Quote_asset_volume', 'Number_of_trades',
+               'Taker_buy_base_asset_volume', 'Taker_buy_quote_asset_volume', 'Ignore']
+
+    all_dataframes = []
+
+    # 產生每日日期清單
+    periods = pd.date_range(start=f"{start_year}-{start_month:02d}-01",
+                            end=f"{end_year}-{end_month:02d}-01",
+                            freq='D')
+
+    for dt in periods:
+        y, m, d = dt.year, dt.month, dt.day
+        file_name = f"{symbol}-{interval}-{y}-{m:02d}-{d:02d}.zip"
+        url = (f"https://data.binance.vision/data/futures/um/daily/klines/"
+               f"{symbol}/{interval}/{file_name}")
+
+        try:
+            response = requests.get(url)
+            if response.status_code == 404:
+                # 未來日期或尚未釋出，靜默跳過
+                continue
+
+            response.raise_for_status()
+
+            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                csv_filename = z.namelist()[0]
+                with z.open(csv_filename) as f:
+                    df_day = pd.read_csv(f, header=None, names=columns)
+                    all_dataframes.append(df_day)
+
+            # 每月第一天印一次進度
+            if d == 1:
+                print(f"✅ 下載中... {y}-{m:02d}")
+
+        except Exception as e:
+            print(f"❌ 下載 {y}-{m:02d}-{d:02d} 時發生錯誤: {e}")
+
+    if not all_dataframes:
+        print("⚠️ 沒有抓到任何資料，請檢查網路。")
+        return None
+
+    final_df = pd.concat(all_dataframes, ignore_index=True)
+
+    # 清理混入的表頭列
+    final_df['Open_time'] = pd.to_numeric(final_df['Open_time'], errors='coerce')
+    final_df = final_df.dropna(subset=['Open_time'])
+
+    final_df['Open_time'] = pd.to_datetime(final_df['Open_time'], unit='ms')
+    final_df.set_index('Open_time', inplace=True)
+
+    numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume',
+                    'Quote_asset_volume', 'Taker_buy_quote_asset_volume']
+    final_df = final_df[numeric_cols].astype(float)
+
+    print(f"\n🎉 合併完成！總共取得 {len(final_df)} 筆 5 分鐘 K 線資料。")
+
+    final_df.reset_index(inplace=True)
+    final_df.rename(columns={'Open_time': 'date'}, inplace=True)
+
+    return final_df
