@@ -101,6 +101,40 @@ def features(df):
                             / (df['Quote_asset_volume'] + 1e-8)
 
     # ==========================================
+    # 📌 5. 新增 BTC 自身指標（7 個）
+    # Stochastic(14,3)、Williams %R(14)、CCI(20)、ROC(10,30)、VWAP Deviation
+    # ==========================================
+
+    # Stochastic %K/%D (14,3)
+    low14  = df['Low'].rolling(14).min()
+    high14 = df['High'].rolling(14).max()
+    df['Stoch_K'] = (df['Close'] - low14) / (high14 - low14 + 1e-9) * 100
+    df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
+
+    # Williams %R (14)
+    df['Williams_R'] = (high14 - df['Close']) / (high14 - low14 + 1e-9) * -100
+
+    # CCI (20) — Commodity Channel Index
+    tp = (df['High'] + df['Low'] + df['Close']) / 3
+    sma20_cci = tp.rolling(20).mean()
+    mad20     = tp.rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    df['CCI_20'] = (tp - sma20_cci) / (0.015 * mad20 + 1e-9)
+
+    # Rate of Change (10, 30)
+    df['ROC_10'] = df['Close'].pct_change(10) * 100
+    df['ROC_30'] = df['Close'].pct_change(30) * 100
+
+    # VWAP Deviation — 每日重置，衡量離日內均價的偏差
+    if 'date' in df.columns:
+        _date_str = df['date'].astype(str).str[:10]
+    else:
+        _date_str = pd.Series(df.index, index=df.index).astype(str)
+    _pv  = (df['Close'] * df['Volume']).groupby(_date_str).cumsum()
+    _vol = df['Volume'].groupby(_date_str).cumsum()
+    _vwap = _pv / (_vol + 1e-9)
+    df['VWAP_Dev'] = df['Close'] / (_vwap + 1e-9) - 1
+
+    # ==========================================
     # 清除 rolling 產生的初期空值
     df = df.dropna().reset_index(drop=True)
 
@@ -108,6 +142,57 @@ def features(df):
     print(f"✅ 完成！共 {feature_count} 個特徵（不含 date、target）。")
     return df
 
+
+
+def alt_features(btc_df, alt_dfs):
+    """
+    為 BTC DataFrame 附加多幣種特徵（ETH / BNB / SOL 等）。
+    每個幣種提取 3 個特徵：Return（5min 漲跌幅）、RSI_14、Volume_Ratio。
+    透過 date 欄左連接，ffill 補缺後 dropna。
+
+    Parameters
+    ----------
+    btc_df   : pd.DataFrame，包含 'date' 欄
+    alt_dfs  : dict，例如 {'ETH': df_eth, 'BNB': df_bnb, 'SOL': df_sol}
+
+    Returns
+    -------
+    pd.DataFrame，原 btc_df 欄位 + 每幣種 3 個新欄位
+    """
+    print("🛠️ 開始合併多幣種特徵...")
+    merged = btc_df.copy()
+
+    for sym, df_alt in alt_dfs.items():
+        df_a = df_alt[['date', 'Close', 'Volume']].copy()
+        df_a['date'] = pd.to_datetime(df_a['date'])
+        df_a = df_a.sort_values('date').reset_index(drop=True)
+
+        # Return (1-bar pct change)
+        df_a[f'{sym}_Return'] = df_a['Close'].pct_change() * 100
+
+        # RSI_14 (Wilder EWM)
+        _d   = df_a['Close'].diff()
+        _g   = _d.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        _l   = (-_d.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+        df_a[f'{sym}_RSI14'] = 100 - (100 / (1 + _g / (_l + 1e-8)))
+
+        # Volume_Ratio (relative to 20-bar rolling mean)
+        df_a[f'{sym}_VolRatio'] = df_a['Volume'] / (df_a['Volume'].rolling(20).mean() + 1e-8)
+
+        # Keep only date + 3 feature columns
+        cols = ['date', f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']
+        df_a = df_a[cols].dropna()
+
+        # Merge on date (left join)
+        merged['date'] = pd.to_datetime(merged['date'])
+        merged = merged.merge(df_a, on='date', how='left')
+        merged[[f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']] = \
+            merged[[f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']].ffill()
+
+    merged = merged.dropna().reset_index(drop=True)
+    new_cols = [c for c in merged.columns if c not in btc_df.columns]
+    print(f"✅ 多幣種合併完成！新增 {len(new_cols)} 個特徵：{new_cols}")
+    return merged
 
 
 def scaler(df, train_ratio=0.7):
