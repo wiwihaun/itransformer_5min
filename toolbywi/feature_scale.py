@@ -135,6 +135,12 @@ def features(df):
     df['VWAP_Dev'] = df['Close'] / (_vwap + 1e-9) - 1
 
     # ==========================================
+    # 📌 6. BTC 近期價格區間（168 根 ≈ 14 小時）
+    # ==========================================
+    df['BTC_High_168'] = df['High'].rolling(168).max()
+    df['BTC_Low_168']  = df['Low'].rolling(168).min()
+
+    # ==========================================
     # 清除 rolling 產生的初期空值
     df = df.dropna().reset_index(drop=True)
 
@@ -144,54 +150,46 @@ def features(df):
 
 
 
+ALT_RAW_COLS = ['Open', 'High', 'Low', 'Close', 'Volume',
+                'Quote_asset_volume', 'Taker_buy_quote_asset_volume']
+
+
 def alt_features(btc_df, alt_dfs):
     """
-    為 BTC DataFrame 附加多幣種特徵（ETH / BNB / SOL 等）。
-    每個幣種提取 3 個特徵：Return（5min 漲跌幅）、RSI_14、Volume_Ratio。
+    為 BTC DataFrame 附加多幣種的 7 個原始欄位作為新維度。
+    每個幣種直接帶入 Open / High / Low / Close / Volume /
+    Quote_asset_volume / Taker_buy_quote_asset_volume，以 {SYM}_ 前綴命名。
     透過 date 欄左連接，ffill 補缺後 dropna。
 
     Parameters
     ----------
     btc_df   : pd.DataFrame，包含 'date' 欄
-    alt_dfs  : dict，例如 {'ETH': df_eth, 'BNB': df_bnb, 'SOL': df_sol}
+    alt_dfs  : dict，例如 {'ETH': df_eth, 'XRP': df_xrp, 'BNB': df_bnb, 'SOL': df_sol}
 
     Returns
     -------
-    pd.DataFrame，原 btc_df 欄位 + 每幣種 3 個新欄位
+    pd.DataFrame，原 btc_df 欄位 + 每幣種最多 7 個新維度
     """
-    print("🛠️ 開始合併多幣種特徵...")
+    print("🛠️ 開始合併多幣種原始欄位為新維度...")
     merged = btc_df.copy()
+    merged['date'] = pd.to_datetime(merged['date'])
 
     for sym, df_alt in alt_dfs.items():
-        df_a = df_alt[['date', 'Close', 'Volume']].copy()
+        keep = ['date'] + [c for c in ALT_RAW_COLS if c in df_alt.columns]
+        df_a = df_alt[keep].copy()
         df_a['date'] = pd.to_datetime(df_a['date'])
         df_a = df_a.sort_values('date').reset_index(drop=True)
 
-        # Return (1-bar pct change)
-        df_a[f'{sym}_Return'] = df_a['Close'].pct_change() * 100
+        rename_map = {c: f'{sym}_{c}' for c in keep if c != 'date'}
+        df_a = df_a.rename(columns=rename_map)
 
-        # RSI_14 (Wilder EWM)
-        _d   = df_a['Close'].diff()
-        _g   = _d.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-        _l   = (-_d.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-        df_a[f'{sym}_RSI14'] = 100 - (100 / (1 + _g / (_l + 1e-8)))
-
-        # Volume_Ratio (relative to 20-bar rolling mean)
-        df_a[f'{sym}_VolRatio'] = df_a['Volume'] / (df_a['Volume'].rolling(20).mean() + 1e-8)
-
-        # Keep only date + 3 feature columns
-        cols = ['date', f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']
-        df_a = df_a[cols].dropna()
-
-        # Merge on date (left join)
-        merged['date'] = pd.to_datetime(merged['date'])
         merged = merged.merge(df_a, on='date', how='left')
-        merged[[f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']] = \
-            merged[[f'{sym}_Return', f'{sym}_RSI14', f'{sym}_VolRatio']].ffill()
+        new_cols = list(rename_map.values())
+        merged[new_cols] = merged[new_cols].ffill()
 
     merged = merged.dropna().reset_index(drop=True)
-    new_cols = [c for c in merged.columns if c not in btc_df.columns]
-    print(f"✅ 多幣種合併完成！新增 {len(new_cols)} 個特徵：{new_cols}")
+    added = [c for c in merged.columns if c not in btc_df.columns]
+    print(f"✅ 多幣種合併完成！新增 {len(added)} 個維度：{added}")
     return merged
 
 
