@@ -12,7 +12,7 @@ python -u run.py \
   --is_training 1 \
   --root_path ./dataset/stock/ \
   --data_path stock_features.csv \
-  --model_id BTC_5min \
+  --model_id BTC_5min_v2 \
   --model $model_name \
   --data custom \
   --features MS \
@@ -21,18 +21,19 @@ python -u run.py \
   --seq_len 576 \
   --label_len 48 \
   --pred_len 1 \
-  --enc_in 19 \
-  --dec_in 19 \
+  --enc_in 35 \
+  --dec_in 35 \
   --c_out 1 \
   --e_layers 2 \
   --d_model 256 \
   --d_ff 512 \
   --n_heads 8 \
   --dropout 0.2 \
-  --batch_size 16 \
+  --batch_size 64 \
   --patience 15 \
   --train_epochs 100 \
-  --learning_rate 0.001 \
+  --learning_rate 0.0001 \
   --lradj type3 \
-  --des BTC_5min \
+  --focal_alpha 0.93 \
+  --des BTC_5min_v2 \
   --itr 1

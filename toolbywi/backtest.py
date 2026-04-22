@@ -92,7 +92,7 @@ def run_backtest(df_test,
                  take_profit_pct=0.02,
                  stop_loss_pct=0.01,
                  max_hold_days=1,
-                 cooldown_hours=4):
+                 cooldown_bars=0):
     """
     執行事件驅動回測核心邏輯。
 
@@ -103,7 +103,7 @@ def run_backtest(df_test,
         take_profit_pct(float)    : 停利百分比
         stop_loss_pct  (float)    : 停損百分比
         max_hold_days  (int)      : 最大持倉天數
-        cooldown_hours (int)      : 兩次進場冷卻小時數
+        cooldown_bars  (int)      : 出場後須等幾根 K 線才能再進場（0 = 下一根即可）
     回傳:
         df_test     : 含 Equity 欄位的 DataFrame
         buy_records : list of (date, price)
@@ -116,7 +116,7 @@ def run_backtest(df_test,
     entry_price     = 0.0
     entry_date      = None
     invested_amount = 0.0
-    last_trade_date = df_test['date'].iloc[0] - pd.Timedelta(days=10)
+    last_exit_bar   = -999          # 初始設極小值，確保第一根 K 線即可進場
 
     equity_curve = []
     buy_records  = []
@@ -141,14 +141,16 @@ def run_backtest(df_test,
                 loss = invested_amount * stop_loss_pct
                 capital += (invested_amount - loss)
                 sl_records.append((current_date, stop_price, entry_price))
-                in_position = False
+                in_position   = False
+                last_exit_bar = i
 
             # 停利
             elif current_high >= target_price:
                 profit = invested_amount * take_profit_pct
                 capital += (invested_amount + profit)
                 tp_records.append((current_date, target_price, entry_price))
-                in_position = False
+                in_position   = False
+                last_exit_bar = i
 
             # 超時出場
             elif (current_date - entry_date) >= pd.Timedelta(days=max_hold_days):
@@ -156,18 +158,18 @@ def run_backtest(df_test,
                 profit = invested_amount * actual_return
                 capital += (invested_amount + profit)
                 te_records.append((current_date, current_close, entry_price))
-                in_position = False
+                in_position   = False
+                last_exit_bar = i
 
         # 狀態 B：檢查進場（elif 確保出場K線不會同時進場）
         elif not in_position:
-            time_since_last = current_date - last_trade_date
-            if signal == 1 and time_since_last >= pd.Timedelta(hours=cooldown_hours):
+            # cooldown_bars=0：出場後下一根即可；cooldown_bars=N：需再等 N 根
+            if signal == 1 and (i - last_exit_bar) > cooldown_bars:
                 in_position     = True
                 entry_price     = current_close
                 entry_date      = current_date
                 invested_amount = capital * position_size
                 capital        -= invested_amount
-                last_trade_date = current_date
                 buy_records.append((current_date, current_close))
 
         # 結算每 K 線淨值
@@ -282,7 +284,7 @@ def backtest(csv_path,
              take_profit_pct=0.02,
              stop_loss_pct=0.01,
              max_hold_days=1,
-             cooldown_hours=4,
+             cooldown_bars=0,
              prob_threshold=0.5):
     """
     一鍵執行完整回測流程：自動找資料夾 → 載入資料 → 回測 → 畫圖 → 輸出績效。
@@ -297,7 +299,7 @@ def backtest(csv_path,
         take_profit_pct (float): 停利百分比 (預設 0.06)
         stop_loss_pct   (float): 停損百分比 (預設 0.02)
         max_hold_days   (int)  : 最大持倉天數 (預設 7)
-        cooldown_hours  (int)  : 兩次進場冷卻小時數 (預設 24)
+        cooldown_bars   (int)  : 出場後須等幾根 K 線才能再進場（0 = 下一根即可，預設 0）
         prob_threshold  (float): 進場機率門檻 (預設 0.5)
 
     使用範例:
@@ -312,7 +314,7 @@ def backtest(csv_path,
 
         df_test, buy_records, tp_records, sl_records, te_records = run_backtest(
             df_test, initial_capital, position_size,
-            take_profit_pct, stop_loss_pct, max_hold_days, cooldown_hours
+            take_profit_pct, stop_loss_pct, max_hold_days, cooldown_bars
         )
 
         print("✅ 回測計算完成，正在生成圖表...")

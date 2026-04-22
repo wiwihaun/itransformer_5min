@@ -4,12 +4,14 @@ from sklearn.preprocessing import StandardScaler
 
 def features(df):
     """
-    全新 18 特徵組（基於五篇高引用論文）— 5min K 線版
+    特徵組（基於五篇高引用論文）— 5min K 線版
     來源：arXiv 2311.14759 / 2410.06935 / 2511.00665 / MDPI TFT / GitHub baruch1192
-    分類：原始價量(2) + 趨勢(4) + 動量(5) + 波動(3) + 量能(4)
+    分類：原始價量(2) + 趨勢(4) + 動量(3) + 波動(3) + 量能(5) + 動量補充(4) + 價格區間(3) + 趨勢強度(1)
     5min 調整：EMA_6→EMA_72 (6h)，ADX_13→ADX_156 (13h)，其餘不變
+    刪除冗餘：RSI_14、MOM_30（與現有高度重複）、Stoch_K/D（≈Williams_R）、ROC_10（雜訊過高）
+    新增：Price_Position_168、Vol_Trend_Ratio、EMA_Trend_ATR
     """
-    print("🛠️ 開始計算全新 18 特徵組 [5min 版]...")
+    print("🛠️ 開始計算特徵組 [5min 版]...")
     df = df.copy()
 
     # ── 共用 True Range 計算（供 ADX、ATR 使用）─────────
@@ -38,16 +40,10 @@ def features(df):
     df['ADX_156'] = dx.ewm(span=156, adjust=False).mean()
 
     # ==========================================
-    # 📌 2. 動量類（5 個）
-    # 論文：arXiv 2410.06935 Chi-Squared Top3：RSI30、MACD、MOM30
+    # 📌 2. 動量類（3 個）
+    # 論文：arXiv 2410.06935 Chi-Squared Top3：RSI30、MACD
     #       arXiv 2511.00665：MACD(17, 21, 15)
     # ==========================================
-    # RSI(14)
-    d14   = df['Close'].diff()
-    g14   = d14.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    l14   = (-d14.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    df['RSI_14'] = 100 - (100 / (1 + g14 / (l14 + 1e-8)))
-
     # RSI(30)
     d30   = df['Close'].diff()
     g30   = d30.clip(lower=0).ewm(alpha=1/30, adjust=False).mean()
@@ -59,9 +55,6 @@ def features(df):
     ema21 = df['Close'].ewm(span=21, adjust=False).mean()
     df['MACD']        = ema17 - ema21
     df['MACD_Signal'] = df['MACD'].ewm(span=15, adjust=False).mean()
-
-    # MOM(30)：動能
-    df['MOM_30'] = df['Close'] - df['Close'].shift(30)
 
     # ==========================================
     # 📌 3. 波動類（3 個）
@@ -101,6 +94,56 @@ def features(df):
                             / (df['Quote_asset_volume'] + 1e-8)
 
     # ==========================================
+    # 📌 5. BTC 自身指標（4 個）
+    # Williams %R(14)、CCI(20)、ROC(30)、VWAP Deviation
+    # ==========================================
+
+    # Williams %R (14)
+    low14  = df['Low'].rolling(14).min()
+    high14 = df['High'].rolling(14).max()
+    df['Williams_R'] = (high14 - df['Close']) / (high14 - low14 + 1e-9) * -100
+
+    # CCI (20) — Commodity Channel Index
+    tp = (df['High'] + df['Low'] + df['Close']) / 3
+    sma20_cci = tp.rolling(20).mean()
+    mad20     = tp.rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    df['CCI_20'] = (tp - sma20_cci) / (0.015 * mad20 + 1e-9)
+
+    # Rate of Change (30)
+    df['ROC_30'] = df['Close'].pct_change(30) * 100
+
+    # VWAP Deviation — 每日重置，衡量離日內均價的偏差
+    if 'date' in df.columns:
+        _date_str = df['date'].astype(str).str[:10]
+    else:
+        _date_str = pd.Series(df.index, index=df.index).astype(str)
+    _pv  = (df['Close'] * df['Volume']).groupby(_date_str).cumsum()
+    _vol = df['Volume'].groupby(_date_str).cumsum()
+    _vwap = _pv / (_vol + 1e-9)
+    df['VWAP_Dev'] = df['Close'] / (_vwap + 1e-9) - 1
+
+    # ==========================================
+    # 📌 6. BTC 近期價格區間（168 根 ≈ 14 小時）+ 衍生特徵
+    # ==========================================
+    df['BTC_High_168'] = df['High'].rolling(168).max()
+    df['BTC_Low_168']  = df['Low'].rolling(168).min()
+
+    # 正規化價格位置（0~100），學習相對位置而非絕對價格
+    df['Price_Position_168'] = (
+        (df['Close'] - df['BTC_Low_168'])
+        / (df['BTC_High_168'] - df['BTC_Low_168'] + 1e-9)
+    ) * 100
+
+    # 量能加速度：1h vs 6h 成交量趨勢，與即時 Volume_Ratio 互補
+    df['Vol_Trend_Ratio'] = (
+        df['Volume'].rolling(12).mean()
+        / (df['Volume'].rolling(72).mean() + 1e-8)
+    )
+
+    # ATR 正規化 EMA 交叉強度，去除絕對價格尺度依賴
+    df['EMA_Trend_ATR'] = df['EMA_Cross'] / (df['ATR_14'] + 1e-8)
+
+    # ==========================================
     # 清除 rolling 產生的初期空值
     df = df.dropna().reset_index(drop=True)
 
@@ -108,6 +151,49 @@ def features(df):
     print(f"✅ 完成！共 {feature_count} 個特徵（不含 date、target）。")
     return df
 
+
+
+ALT_RAW_COLS = ['Open', 'High', 'Low', 'Close', 'Volume',
+                'Quote_asset_volume', 'Taker_buy_quote_asset_volume']
+
+
+def alt_features(btc_df, alt_dfs):
+    """
+    為 BTC DataFrame 附加多幣種的 7 個原始欄位作為新維度。
+    每個幣種直接帶入 Open / High / Low / Close / Volume /
+    Quote_asset_volume / Taker_buy_quote_asset_volume，以 {SYM}_ 前綴命名。
+    透過 date 欄左連接，ffill 補缺後 dropna。
+
+    Parameters
+    ----------
+    btc_df   : pd.DataFrame，包含 'date' 欄
+    alt_dfs  : dict，例如 {'ETH': df_eth, 'XRP': df_xrp, 'BNB': df_bnb, 'SOL': df_sol}
+
+    Returns
+    -------
+    pd.DataFrame，原 btc_df 欄位 + 每幣種最多 7 個新維度
+    """
+    print("🛠️ 開始合併多幣種原始欄位為新維度...")
+    merged = btc_df.copy()
+    merged['date'] = pd.to_datetime(merged['date'])
+
+    for sym, df_alt in alt_dfs.items():
+        keep = ['date'] + [c for c in ALT_RAW_COLS if c in df_alt.columns]
+        df_a = df_alt[keep].copy()
+        df_a['date'] = pd.to_datetime(df_a['date'])
+        df_a = df_a.sort_values('date').reset_index(drop=True)
+
+        rename_map = {c: f'{sym}_{c}' for c in keep if c != 'date'}
+        df_a = df_a.rename(columns=rename_map)
+
+        merged = merged.merge(df_a, on='date', how='left')
+        new_cols = list(rename_map.values())
+        merged[new_cols] = merged[new_cols].ffill()
+
+    merged = merged.dropna().reset_index(drop=True)
+    added = [c for c in merged.columns if c not in btc_df.columns]
+    print(f"✅ 多幣種合併完成！新增 {len(added)} 個維度：{added}")
+    return merged
 
 
 def scaler(df, train_ratio=0.7):
@@ -132,5 +218,3 @@ def scaler(df, train_ratio=0.7):
 
     print(f"✅ 統一 Z-Score 完成！共縮放 {len(feature_cols)} 個特徵。")
     return df_scaled
-
-
