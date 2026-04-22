@@ -4,12 +4,14 @@ from sklearn.preprocessing import StandardScaler
 
 def features(df):
     """
-    全新 18 特徵組（基於五篇高引用論文）— 5min K 線版
+    特徵組（基於五篇高引用論文）— 5min K 線版
     來源：arXiv 2311.14759 / 2410.06935 / 2511.00665 / MDPI TFT / GitHub baruch1192
-    分類：原始價量(2) + 趨勢(4) + 動量(5) + 波動(3) + 量能(4)
+    分類：原始價量(2) + 趨勢(4) + 動量(3) + 波動(3) + 量能(5) + 動量補充(4) + 價格區間(3) + 趨勢強度(1)
     5min 調整：EMA_6→EMA_72 (6h)，ADX_13→ADX_156 (13h)，其餘不變
+    刪除冗餘：RSI_14、MOM_30（與現有高度重複）、Stoch_K/D（≈Williams_R）、ROC_10（雜訊過高）
+    新增：Price_Position_168、Vol_Trend_Ratio、EMA_Trend_ATR
     """
-    print("🛠️ 開始計算全新 18 特徵組 [5min 版]...")
+    print("🛠️ 開始計算特徵組 [5min 版]...")
     df = df.copy()
 
     # ── 共用 True Range 計算（供 ADX、ATR 使用）─────────
@@ -38,16 +40,10 @@ def features(df):
     df['ADX_156'] = dx.ewm(span=156, adjust=False).mean()
 
     # ==========================================
-    # 📌 2. 動量類（5 個）
-    # 論文：arXiv 2410.06935 Chi-Squared Top3：RSI30、MACD、MOM30
+    # 📌 2. 動量類（3 個）
+    # 論文：arXiv 2410.06935 Chi-Squared Top3：RSI30、MACD
     #       arXiv 2511.00665：MACD(17, 21, 15)
     # ==========================================
-    # RSI(14)
-    d14   = df['Close'].diff()
-    g14   = d14.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    l14   = (-d14.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    df['RSI_14'] = 100 - (100 / (1 + g14 / (l14 + 1e-8)))
-
     # RSI(30)
     d30   = df['Close'].diff()
     g30   = d30.clip(lower=0).ewm(alpha=1/30, adjust=False).mean()
@@ -59,9 +55,6 @@ def features(df):
     ema21 = df['Close'].ewm(span=21, adjust=False).mean()
     df['MACD']        = ema17 - ema21
     df['MACD_Signal'] = df['MACD'].ewm(span=15, adjust=False).mean()
-
-    # MOM(30)：動能
-    df['MOM_30'] = df['Close'] - df['Close'].shift(30)
 
     # ==========================================
     # 📌 3. 波動類（3 個）
@@ -101,17 +94,13 @@ def features(df):
                             / (df['Quote_asset_volume'] + 1e-8)
 
     # ==========================================
-    # 📌 5. 新增 BTC 自身指標（7 個）
-    # Stochastic(14,3)、Williams %R(14)、CCI(20)、ROC(10,30)、VWAP Deviation
+    # 📌 5. BTC 自身指標（4 個）
+    # Williams %R(14)、CCI(20)、ROC(30)、VWAP Deviation
     # ==========================================
 
-    # Stochastic %K/%D (14,3)
+    # Williams %R (14)
     low14  = df['Low'].rolling(14).min()
     high14 = df['High'].rolling(14).max()
-    df['Stoch_K'] = (df['Close'] - low14) / (high14 - low14 + 1e-9) * 100
-    df['Stoch_D'] = df['Stoch_K'].rolling(3).mean()
-
-    # Williams %R (14)
     df['Williams_R'] = (high14 - df['Close']) / (high14 - low14 + 1e-9) * -100
 
     # CCI (20) — Commodity Channel Index
@@ -120,8 +109,7 @@ def features(df):
     mad20     = tp.rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
     df['CCI_20'] = (tp - sma20_cci) / (0.015 * mad20 + 1e-9)
 
-    # Rate of Change (10, 30)
-    df['ROC_10'] = df['Close'].pct_change(10) * 100
+    # Rate of Change (30)
     df['ROC_30'] = df['Close'].pct_change(30) * 100
 
     # VWAP Deviation — 每日重置，衡量離日內均價的偏差
@@ -135,10 +123,25 @@ def features(df):
     df['VWAP_Dev'] = df['Close'] / (_vwap + 1e-9) - 1
 
     # ==========================================
-    # 📌 6. BTC 近期價格區間（168 根 ≈ 14 小時）
+    # 📌 6. BTC 近期價格區間（168 根 ≈ 14 小時）+ 衍生特徵
     # ==========================================
     df['BTC_High_168'] = df['High'].rolling(168).max()
     df['BTC_Low_168']  = df['Low'].rolling(168).min()
+
+    # 正規化價格位置（0~100），學習相對位置而非絕對價格
+    df['Price_Position_168'] = (
+        (df['Close'] - df['BTC_Low_168'])
+        / (df['BTC_High_168'] - df['BTC_Low_168'] + 1e-9)
+    ) * 100
+
+    # 量能加速度：1h vs 6h 成交量趨勢，與即時 Volume_Ratio 互補
+    df['Vol_Trend_Ratio'] = (
+        df['Volume'].rolling(12).mean()
+        / (df['Volume'].rolling(72).mean() + 1e-8)
+    )
+
+    # ATR 正規化 EMA 交叉強度，去除絕對價格尺度依賴
+    df['EMA_Trend_ATR'] = df['EMA_Cross'] / (df['ATR_14'] + 1e-8)
 
     # ==========================================
     # 清除 rolling 產生的初期空值
@@ -215,5 +218,3 @@ def scaler(df, train_ratio=0.7):
 
     print(f"✅ 統一 Z-Score 完成！共縮放 {len(feature_cols)} 個特徵。")
     return df_scaled
-
-
